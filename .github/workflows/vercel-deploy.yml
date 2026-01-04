@@ -1,0 +1,101 @@
+name: ARCHON Auto Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_target:
+        description: 'Deploy target (production/preview)'
+        required: false
+        default: 'production'
+      triggered_by:
+        description: 'Trigger source (GPT-5/Claude/manual)'
+        required: false
+        default: 'manual'
+      description:
+        description: 'Deploy description'
+        required: false
+        default: 'Auto deploy via ARCHON Bridge'
+  push:
+    branches:
+      - main
+  repository_dispatch:
+    types: [deploy-archon]
+
+env:
+  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout archon-frontend
+        uses: actions/checkout@v4
+        with:
+          repository: selfarchitectai-design/archon-frontend
+          token: ${{ secrets.GH_PAT }}
+          ref: main
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: 📚 Install Dependencies
+        run: npm ci || npm install
+
+      - name: 🔨 Build Project
+        run: npm run build
+        env:
+          NEXT_PUBLIC_API_URL: https://www.selfarchitectai.com
+
+      - name: 🚀 Deploy to Vercel
+        uses: amondnet/vercel-action@v25
+        id: vercel-deploy
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          vercel-args: '--prod'
+          working-directory: ./
+
+      - name: 📊 Report Deploy Status
+        if: always()
+        run: |
+          echo "## 🚀 ARCHON Deploy Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Status** | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Triggered By** | ${{ github.event.inputs.triggered_by || 'push' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Target** | ${{ github.event.inputs.deploy_target || 'production' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Deploy URL** | ${{ steps.vercel-deploy.outputs.preview-url }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Timestamp** | $(date -u +"%Y-%m-%d %H:%M:%S UTC") |" >> $GITHUB_STEP_SUMMARY
+
+      - name: 🔔 Notify ARCHON Dashboard
+        if: success()
+        run: |
+          curl -s -X POST "https://www.selfarchitectai.com/api/archon/trust/log" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "event": "github_autodeploy",
+              "status": "success",
+              "triggered_by": "${{ github.event.inputs.triggered_by || 'push' }}",
+              "deploy_url": "${{ steps.vercel-deploy.outputs.preview-url }}",
+              "timestamp": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'"
+            }' || true
+
+      - name: ❌ Notify on Failure
+        if: failure()
+        run: |
+          curl -s -X POST "https://www.selfarchitectai.com/api/archon/trust/log" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "event": "github_autodeploy",
+              "status": "failed",
+              "triggered_by": "${{ github.event.inputs.triggered_by || 'push' }}",
+              "error": "Deploy failed - check GitHub Actions logs",
+              "timestamp": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'"
+            }' || true

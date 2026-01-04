@@ -1,0 +1,73 @@
+# ARCHON Deploy Bridge Configuration
+# Version: 1.0
+# Updated: 2026-01-04
+
+bridge:
+  name: "archon-deploy-bridge"
+  version: "1.0.0"
+  description: "GPT-5 → GitHub Actions → Vercel auto deploy pipeline"
+
+source:
+  repository: "selfarchitectai-design/archon-frontend"
+  branch: "main"
+  
+target:
+  platform: "vercel"
+  project_id: "prj_OguVxu6oPwGbcIwwEtYq6JkSNj2s"
+  team_id: "team_1ObevaGr4rOEodjKXBbPrsLN"
+  domains:
+    - "dashboard.selfarchitectai.com"
+    - "www.selfarchitectai.com"
+    - "selfarchitectai.com"
+
+triggers:
+  allowed_sources:
+    - name: "GPT-5"
+      type: "workflow_dispatch"
+      description: "Primary AI controller"
+      
+    - name: "Claude"
+      type: "workflow_dispatch"
+      description: "Supervisor AI (trusted override)"
+      
+    - name: "push"
+      type: "push"
+      description: "Git push to main branch"
+      
+    - name: "manual"
+      type: "workflow_dispatch"
+      description: "Manual GitHub UI trigger"
+
+workflows:
+  main:
+    name: "vercel-deploy.yml"
+    events:
+      - workflow_dispatch
+      - push
+      - repository_dispatch
+    
+deploy:
+  mode: "production"
+  build_command: "npm run build"
+  output_directory: ".next"
+  node_version: "20"
+  
+notifications:
+  on_success:
+    - endpoint: "https://www.selfarchitectai.com/api/archon/trust/log"
+      method: "POST"
+      
+  on_failure:
+    - endpoint: "https://www.selfarchitectai.com/api/archon/trust/log"
+      method: "POST"
+
+integration:
+  archon_dashboard: "https://dashboard.selfarchitectai.com"
+  trust_api: "https://www.selfarchitectai.com/api/archon/trust"
+  claude_trigger: "https://www.selfarchitectai.com/api/claude/trigger"
+
+notes:
+  - "This bridge enables safe, automated deploys without direct Lambda/Vercel API access"
+  - "GPT-5 triggers via workflow_dispatch API"
+  - "Claude remains in supervisor mode, monitoring deploy results"
+  - "All deploys are logged to ARCHON dashboard"
